@@ -47,22 +47,23 @@ import static com.comphenix.protocol.PacketType.Play.Server.NAMED_ENTITY_SPAWN;
 /**
  * Modify player equipment.
  *
+ * This version is adapted for the legacy Minecraft 1.8.8 equipment packet
+ * layout. In 1.8 there is no offhand slot and Bukkit does not have
+ * getItemInMainHand()/getItemInOffHand().
+ *
  * @author Kristian
  */
 public abstract class FakeEquipment {
   /**
-   * Represents an equipment slot.
-   *
-   * @author Kristian
+   * Represents an equipment slot for Minecraft 1.8.x.
    */
   public enum EquipmentSlot {
-    // http://wiki.vg/Protocol#Entity_Equipment_.280x05.29
-    MAINHAND(0),
-    OFFHAND(1),
-    FEET(2),
-    LEGS(3),
-    CHEST(4),
-    HEAD(5);
+    // 1.8 ENTITY_EQUIPMENT packet slots: 0 hand, 1 boots, 2 leggings, 3 chestplate, 4 helmet.
+    HAND(0),
+    FEET(1),
+    LEGS(2),
+    CHEST(3),
+    HEAD(4);
 
     private int id;
 
@@ -79,10 +80,8 @@ public abstract class FakeEquipment {
     public ItemStack getEquipment(LivingEntity entity) {
       try {
         switch (this) {
-          case MAINHAND:
-            return entity.getEquipment().getItemInMainHand();
-          case OFFHAND:
-            return entity.getEquipment().getItemInOffHand();
+          case HAND:
+            return entity.getEquipment().getItemInHand();
           case FEET:
             return entity.getEquipment().getBoots();
           case LEGS:
@@ -107,7 +106,7 @@ public abstract class FakeEquipment {
      */
     public boolean isEmpty(LivingEntity entity) {
       ItemStack stack = getEquipment(entity);
-      return stack != null && stack.getType() == Material.AIR;
+      return stack == null || stack.getType() == Material.AIR;
     }
 
     /**
@@ -137,8 +136,6 @@ public abstract class FakeEquipment {
 
   /**
    * Represents an equipment event.
-   *
-   * @author Kristian
    */
   public static class EquipmentSendingEvent {
     private Player client;
@@ -153,68 +150,38 @@ public abstract class FakeEquipment {
       this.equipment = equipment;
     }
 
-    /**
-     * Retrieve the client that is observing the entity.
-     *
-     * @return The observing client.
-     */
     public Player getClient() {
       return client;
     }
 
-    /**
-     * Retrieve the entity whose armor or held item we are updating.
-     *
-     * @return The visible entity.
-     */
     public LivingEntity getVisibleEntity() {
       return visibleEntity;
     }
 
-    /**
-     * Retrieve the equipment that we are
-     *
-     * @return
-     */
     public ItemStack getEquipment() {
       return equipment;
     }
 
-    /**
-     * Set the equipment we will send to the player.
-     *
-     * @param equipment - the equipment, or NULL to sent air.
-     */
     public void setEquipment(ItemStack equipment) {
       this.equipment = equipment;
     }
 
-    /**
-     * Retrieve the slot of this equipment.
-     *
-     * @return The slot.
-     */
     public EquipmentSlot getSlot() {
       return slot;
     }
 
-    /**
-     * Set the slot of this equipment.
-     *
-     * @param slot - the slot.
-     */
     public void setSlot(EquipmentSlot slot) {
       this.slot = Preconditions.checkNotNull(slot, "slot cannot be NULL");
     }
   }
 
-  // Necessary to detect duplicate
+  // Necessary to detect duplicate packets.
   private Map<Object, EquipmentSlot> processedPackets = new MapMaker().weakKeys().makeMap();
 
   private Plugin plugin;
   private ProtocolManager manager;
 
-  // Current listener
+  // Current listener.
   private PacketListener listener;
 
   public FakeEquipment(Plugin plugin) {
@@ -229,41 +196,37 @@ public abstract class FakeEquipment {
             PacketType type = event.getPacketType();
 
             if (packet.getEntityModifier(event).read(0) instanceof LivingEntity) {
-              // The entity that is being displayed on the player's screen
               LivingEntity visibleEntity = (LivingEntity) packet.getEntityModifier(event).read(0);
               Player observingPlayer = event.getPlayer();
 
               if (ENTITY_EQUIPMENT.equals(type)) {
-                EquipmentSlot slot = EquipmentSlot.fromId(packet.getItemSlots().read(0).ordinal());
+                EquipmentSlot slot = EquipmentSlot.fromId(packet.getIntegers().read(1));
                 ItemStack equipment = packet.getItemModifier().read(0);
                 EquipmentSendingEvent sendingEvent = new EquipmentSendingEvent(
                     observingPlayer, visibleEntity, slot, equipment);
 
-                // Assume we process all packets - the overhead isn't that bad
                 EquipmentSlot previous = processedPackets.get(packet.getHandle());
 
-                // See if this packet instance has already been processed
                 if (previous != null) {
-                  // Clone it - otherwise, we'll loose the old modification
                   packet = event.getPacket().deepClone();
                   sendingEvent.setSlot(previous);
-                  sendingEvent.setEquipment(previous.getEquipment(visibleEntity).clone());
+
+                  ItemStack previousEquipment = previous.getEquipment(visibleEntity);
+                  sendingEvent.setEquipment(previousEquipment != null ? previousEquipment.clone() : null);
                 }
 
                 if (onEquipmentSending(sendingEvent)) {
                   processedPackets.put(packet.getHandle(), previous != null ? previous : slot);
                 }
 
-                // Save changes
                 if (slot != sendingEvent.getSlot()) {
-                  packet.getIntegers().write(0, slot.getId());
+                  packet.getIntegers().write(1, sendingEvent.getSlot().getId());
                 }
                 if (equipment != sendingEvent.getEquipment()) {
                   packet.getItemModifier().write(0, sendingEvent.getEquipment());
                 }
 
               } else if (NAMED_ENTITY_SPAWN.equals(type)) {
-                // Trigger updates?
                 onEntitySpawn(observingPlayer, visibleEntity);
               } else {
                 throw new IllegalArgumentException("Unknown packet type:" + type);
@@ -284,9 +247,7 @@ public abstract class FakeEquipment {
   }
 
   /**
-   * Invoked when the equipment or held item of an living entity is sent to a client.
-   * <p>
-   * This can be fully modified. Please return TRUE if you do, though.
+   * Invoked when the equipment or held item of a living entity is sent to a client.
    *
    * @param equipmentEvent - the equipment event.
    * @return TRUE if the equipment was modified, FALSE otherwise.
@@ -301,17 +262,18 @@ public abstract class FakeEquipment {
    * @param slot          - the equipment slot to update.
    */
   public void updateSlot(final Player client, LivingEntity visibleEntity, EquipmentSlot slot) {
-    if (listener == null)
+    if (listener == null) {
       throw new IllegalStateException("FakeEquipment has closed.");
+    }
 
     final PacketContainer equipmentPacket = new PacketContainer(ENTITY_EQUIPMENT);
-    equipmentPacket.getIntegers().
-        write(0, visibleEntity.getEntityId()).
-        write(1, slot.getId());
-    equipmentPacket.getItemModifier().
-        write(0, slot.getEquipment(visibleEntity));
+    equipmentPacket.getIntegers()
+        .write(0, visibleEntity.getEntityId())
+        .write(1, slot.getId());
+    equipmentPacket.getItemModifier()
+        .write(0, slot.getEquipment(visibleEntity));
 
-    // We have to send the packet AFTER named entity spawn has been sent
+    // We have to send the packet AFTER named entity spawn has been sent.
     plugin.getServer().getScheduler().scheduleSyncDelayedTask(plugin, new Runnable() {
       @Override
       public void run() {
