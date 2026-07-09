@@ -28,7 +28,10 @@ public class VirtualFurnace_v1_8_R3 extends TileEntityFurnace implements Virtual
     this.c();
   }
 
-  @Override
+  /**
+   * Keep fuel time permissive for the virtual furnace.
+   * Do not annotate with @Override because this NMS method differs between versions.
+   */
   public int a(ItemStack itemstack) {
     return 100;
   }
