@@ -20,6 +20,9 @@ public class EnderBrewingManager {
     Main main = Main.getInstance();
 
     switch (Minecraft.Version.getVersion()) {
+      case v1_8_R3:
+        brewingManager = new BrewingManager_v1_8_R3(main);
+        break;
       case v1_9_R1:
         brewingManager = new BrewingManager_v1_9_R1(main);
         break;

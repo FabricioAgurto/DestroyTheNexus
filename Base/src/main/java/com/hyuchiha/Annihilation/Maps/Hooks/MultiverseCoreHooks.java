@@ -1,6 +1,5 @@
 package com.hyuchiha.Annihilation.Maps.Hooks;
 
-import com.onarandombox.MultiverseCore.MultiverseCore;
 import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 
@@ -29,14 +28,10 @@ public class MultiverseCoreHooks implements Hooks {
 
   @Override
   public void postLoad(String world, World.Environment environment) {
-    World bukkitWorld = plugin.getServer().getWorld(world);
-    if (bukkitWorld != null && getMultiverseCore().getMVWorldManager().getMVWorld(world) == null) {
-      getMultiverseCore().getMVWorldManager().addWorld(world, environment, String.valueOf(bukkitWorld.getSeed()), bukkitWorld.getWorldType(), Boolean.TRUE, null);
+    // 1.8.8 MVP: avoid compile-time dependency on Multiverse-Core.
+    // Multiverse integration can be re-added later through reflection or a dedicated optional module.
+    if (plugin.getServer().getPluginManager().getPlugin("Multiverse-Core") == null) {
+      return;
     }
   }
-
-  private MultiverseCore getMultiverseCore() {
-    return (MultiverseCore) plugin.getServer().getPluginManager().getPlugin("Multiverse-Core");
-  }
-
 }
